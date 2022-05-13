@@ -362,9 +362,26 @@ export namespace CancellationStrategy {
 	}
 }
 
+export interface MessageStrategy {
+	handleMessage(message: Message, next: (message: Message) => void): void;
+}
+export namespace MessageStrategy {
+	export const Message: MessageStrategy = Object.freeze({
+		handleMessage(message, next): void {
+			next(message);
+		}
+	});
+
+	export function is(value: any): value is MessageStrategy {
+		const candidate: MessageStrategy = value;
+		return candidate && Is.func(candidate.handleMessage);
+	}
+}
+
 export interface ConnectionOptions {
 	cancellationStrategy?: CancellationStrategy
 	connectionStrategy?: ConnectionStrategy
+	messageStrategy?: MessageStrategy
 }
 export namespace ConnectionOptions {
 	export function is(value: any): value is ConnectionOptions {
@@ -583,21 +600,31 @@ export function createMessageConnection(messageReader: MessageReader, messageWri
 		});
 	}
 
+	function handleMessage (message: Message) {
+		if (isRequestMessage(message)) {
+			handleRequest(message);
+		} else if (isNotificationMessage(message)) {
+			handleNotification(message);
+		} else if (isResponseMessage(message)) {
+			handleResponse(message);
+		} else {
+			handleInvalidMessage(message);
+		}
+	}
+
 	function processMessageQueue(): void {
 		if (messageQueue.size === 0) {
 			return;
 		}
 		const message = messageQueue.shift()!;
 		try {
-			if (isRequestMessage(message)) {
-				handleRequest(message);
-			} else if (isNotificationMessage(message)) {
-				handleNotification(message);
-			} else if (isResponseMessage(message)) {
-				handleResponse(message);
+			const strategy = options?.messageStrategy;
+			if (strategy && strategy.handleMessage) {
+				strategy.handleMessage(message, handleMessage);
 			} else {
-				handleInvalidMessage(message);
+				handleMessage(message);
 			}
+
 		} finally {
 			triggerMessageQueue();
 		}
